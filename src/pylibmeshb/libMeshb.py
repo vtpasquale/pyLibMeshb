@@ -35,9 +35,12 @@ Integer width and float precision depend on the file version:
     version 4         : 64-bit ints, 64-bit floats
 
 Requirements:
-    - libmeshb8.c and libmeshb8.h in the same directory (or set LIBMESHB_DIR)
-    - a C compiler on PATH (gcc/cc/clang)
     - numpy
+    - Linux: (1) a C compiler on PATH (gcc/cc/clang) 
+             (2) OR libmeshb8_shared.so in csrc/libMeshb
+    - Windows: libmeshb8.dll in csrc/libMeshb
+    - See https://github.com/vtpasquale/pyLibMeshb/releases/tag/v0.0-lib
+       for precomplied shared libraries
 """
 
 import ctypes
@@ -49,13 +52,19 @@ from ctypes import c_int, c_int64, c_void_p, byref
 
 import numpy as np
 
-# LIBMESHB_DIR = os.environ.get("LIBMESHB_DIR", os.path.dirname(os.path.abspath(__file__)))
-LIBMESHB_DIR = '/home/vtpasquale/projects/pyLibMeshb/csrc/libMeshb'
+# Library paths and files 
+this_dir = os.path.dirname(os.path.abspath(__file__))
+LIBMESHB_DIR = os.path.normpath(os.path.join(this_dir,"..","..","csrc","libMeshb'"))
 
 HEADER_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.h")
 SOURCE_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.c")
-LIBRARY_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8_shared.so")
 
+if sys.platform.startswith("win"):
+    LIBRARY_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.dll")
+else:
+    LIBRARY_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8_shared.so")
+
+    
 # #define macros in libmeshb8.h -- stable, explicit constants.
 GmfRead = 1
 GmfWrite = 2
