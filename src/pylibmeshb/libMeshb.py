@@ -54,7 +54,7 @@ import numpy as np
 
 # Library paths and files 
 this_dir = os.path.dirname(os.path.abspath(__file__))
-LIBMESHB_DIR = os.path.normpath(os.path.join(this_dir,"..","..","csrc","libMeshb'"))
+LIBMESHB_DIR = os.path.normpath(os.path.join(this_dir,"..","..","csrc","libMeshb"))
 
 HEADER_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.h")
 SOURCE_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.c")
