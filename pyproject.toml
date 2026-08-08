@@ -1,7 +1,7 @@
 [project]
 name = "pyLibMeshb"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "Python bindings for LibMeshb - the Gamma Mesh Format"
 readme = "README.md"
 authors = [
     { name = "Anthony Ricciardi", email = "vtpasquale@gmail.com" }
