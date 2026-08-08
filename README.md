@@ -3,19 +3,59 @@
 Python bindings for [LibMeshb](https://github.com/LoicMarechal/libMeshb) (the
 Gamma Mesh Format / `.mesh`/`.meshb`/`.sol`/`.solb` library) via `ctypes`,
 built directly against the `libmeshb8.c` / `libmeshb8.h` source files. 
-The C library is compiled once into a shared library (`.so` / `.dll`) and driven
-from Python through `ctypes`.
 
-- The shared library (`libmeshb8_shared.so`) will be compiled automatically on Linux if a C compiler is available.  
-- The shared library (`libmeshb8.dll`) must be provided on Windows — placed at `pyLibMeshb/csrc/libMeshb/libmeshb8.dll`.
-   - The user can cross-compile the Windows binary on Linux using [build_windows_dll_from_linux.py](pyLibMeshb/csrc/libMeshb/build_windows_dll_from_linux.py)
-   - Alternatively, prebuilt Windows and Linux binaries are available at the [release page](https://github.com/vtpasquale/pyLibMeshb/releases/tag/v0.0-lib)
-- The software should be extendable to macOS (`.dylib`), but this has not been tested.
+## Installation
 
-An included example file shows:
-- Reading and writing 2D meshes: `Vertices`, `Triangles`, `Edges`
-- Reading and writing solution files (`.sol` / `.solb`) with an arbitrary,
-  user-defined number of independent scalar fields per vertex
+`pyLibMeshb` ships as prebuilt wheels for **Linux** and **Windows** (x86_64), attached to each [GitHub Release](https://github.com/vtpasquale/pyLibMeshb/releases). No C compiler is required to install — the compiled library is bundled inside the wheel.
+
+### Option 1: Install directly from a GitHub Release (recommended)
+
+1. Go to the [Releases page](https://github.com/vtpasquale/pyLibMeshb/releases) and find the version you want.
+2. Under **Assets**, right-click the wheel matching your platform and copy the link:
+   - `pylibmeshb-<version>-*-linux_x86_64.whl` for Linux
+   - `pylibmeshb-<version>-*-win_amd64.whl` for Windows
+3. Install it directly from the URL:
+
+   ```bash
+   pip install https://github.com/vtpasquale/pyLibMeshb/releases/download/v0.1.0/pylibmeshb-0.1.0-cp312-cp312-linux_x86_64.whl
+   ```
+
+   Replace the URL with the actual asset link for your platform and Python version. 
+
+### Option 2: Download, then install locally
+
+If you'd rather download the file first (e.g. to inspect it, or install on an air-gapped machine):
+
+```bash
+# after downloading the .whl file to your machine
+pip install ./pylibmeshb-0.1.0-cp312-cp312-linux_x86_64.whl
+```
+
+### Option 3: Install from source
+
+If no prebuilt wheel matches your platform or Python version, you can build from source. This requires a C compiler. 
+
+```bash
+git clone https://github.com/vtpasquale/pyLibMeshb.git
+cd pyLibMeshb
+pip install .
+```
+
+### Requirements
+
+- Python 3.12 or later
+- `numpy` (installed automatically as a dependency)
+- Supported platforms: Linux x86_64, Windows x86_64 (64-bit)
+
+### Verifying the install
+
+```python
+import pyLibMeshb
+print("pyLibMeshb installed successfully")
+```
+
+If you see an `ImportError` mentioning a missing compiled library (`_libmeshb.so` / `_libmeshb.dll`), double-check that you downloaded the wheel matching your operating system and Python version — mixing platforms (e.g. installing the Windows wheel on Linux) will fail at import time.
+
   
 ## Credits
 - [LibMeshb](https://github.com/LoicMarechal/libMeshb) — Loïc Maréchal, INRIA

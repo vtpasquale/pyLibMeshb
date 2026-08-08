@@ -33,8 +33,19 @@ jobs:
           name: wheel-windows
           path: dist/*.whl
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos
+          path: dist/*.whl
+
   check-contents:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -44,7 +55,7 @@ jobs:
       - run: pip install check-wheel-contents && check-wheel-contents dist/*.whl
 
   release:
-    needs: [build-linux, build-windows, check-contents]
+    needs: [build-linux, build-windows, build-macos, check-contents]
     runs-on: ubuntu-latest
     permissions:
       contents: write
