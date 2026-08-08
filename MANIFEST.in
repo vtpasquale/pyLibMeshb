@@ -1,0 +1,2 @@
+include csrc/libMeshb/libmeshb8.c
+include csrc/libMeshb/libmeshb8.h

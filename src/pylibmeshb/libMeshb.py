@@ -36,35 +36,19 @@ Integer width and float precision depend on the file version:
 
 Requirements:
     - numpy
-    - Linux: (1) a C compiler on PATH (gcc/cc/clang) 
-             (2) OR libmeshb8_shared.so in csrc/libMeshb
-    - Windows: libmeshb8.dll in csrc/libMeshb
-    - See https://github.com/vtpasquale/pyLibMeshb/releases/tag/v0.0-lib
-       for precomplied shared libraries
+    - A compiled `_libmeshb.so` (Linux) or `_libmeshb.dll` (Windows) and
+      `libmeshb8.h` must be present inside the installed pyLibMeshb
+      package (bundled automatically by `pip install`/wheel builds via
+      setup.py's build_ext step -- no compiler needed at import time).
 """
 
 import ctypes
-import os
 import re
-import subprocess
 import sys
+import importlib.resources
 from ctypes import c_int, c_int64, c_void_p, byref
-
 import numpy as np
-
-# Library paths and files 
-this_dir = os.path.dirname(os.path.abspath(__file__))
-LIBMESHB_DIR = os.path.normpath(os.path.join(this_dir,"..","..","csrc","libMeshb"))
-
-HEADER_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.h")
-SOURCE_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.c")
-
-if sys.platform.startswith("win"):
-    LIBRARY_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8.dll")
-else:
-    LIBRARY_PATH = os.path.join(LIBMESHB_DIR, "libmeshb8_shared.so")
-
-    
+   
 # #define macros in libmeshb8.h -- stable, explicit constants.
 GmfRead = 1
 GmfWrite = 2
@@ -81,15 +65,13 @@ GmfDoubleVec = 13
 GmfIntVec = 14
 GmfLongVec = 15
 
-
 # ----------------------------------------------------------------------------
 # 1. Parse the GmfKwdCod enum straight out of the header so keyword indices
 #    can never drift out of sync with whatever version of the header you have.
 # ----------------------------------------------------------------------------
 def parse_keyword_enum(header_path):
-    with open(header_path, "r") as f:
-        text = f.read()
-
+    text = header_path.read_text()
+    
     m = re.search(r"enum\s+GmfKwdCod\s*\{(.*?)\};", text, re.S)
     if not m:
         raise RuntimeError("Could not locate 'enum GmfKwdCod' in header")
@@ -103,24 +85,7 @@ def parse_keyword_enum(header_path):
 # ----------------------------------------------------------------------------
 # 2. Compile libmeshb8.c into a shared library if it hasn't been built yet.
 # ----------------------------------------------------------------------------
-def build_shared_library(force=False):
-    if os.path.exists(LIBRARY_PATH) and not force:
-        return LIBRARY_PATH
-
-    compiler = os.environ.get("CC", "gcc")
-    cmd = [
-        compiler, "-O2", "-fPIC", "-shared",
-        "-o", LIBRARY_PATH,
-        SOURCE_PATH,
-        "-I", LIBMESHB_DIR,
-        "-lz",
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError:
-        cmd = [c for c in cmd if c != "-lz"]
-        subprocess.run(cmd, check=True)
-    return LIBRARY_PATH
+# This is now part of the module build system
 
 
 # ----------------------------------------------------------------------------
@@ -451,10 +416,19 @@ def write_solution(path, values, version=3, dim=2, keyword="GmfSolAtVertices"):
 # ----------------------------------------------------------------------------
 # Module-level setup: parse header, build/load library
 # ----------------------------------------------------------------------------
+HEADER_PATH = importlib.resources.files("pyLibMeshb") / "libmeshb8.h"
 KWD = parse_keyword_enum(HEADER_PATH)
-_lib_path = build_shared_library()
-LM = LibMeshb(_lib_path)
 
+_suffix = "_libmeshb.dll" if sys.platform.startswith("win") else "_libmeshb.so"
+_lib_path = importlib.resources.files("pyLibMeshb") / _suffix
+
+if not _lib_path.is_file():
+    raise ImportError(
+        f"Compiled library '{_suffix}' not found in pyLibMeshb package. "
+        "Was the wheel built with the matching platform's build_ext step?"
+    )
+
+LM = LibMeshb(str(_lib_path))
 
 # ----------------------------------------------------------------------------
 # Example / CLI entry point
