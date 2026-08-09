@@ -1,12 +1,13 @@
 # pyLibMeshb
 
-Python bindings for [LibMeshb](https://github.com/LoicMarechal/libMeshb) (the
-Gamma Mesh Format / `.mesh`/`.meshb`/`.sol`/`.solb` library) via `ctypes`,
-built directly against the `libmeshb8.c` / `libmeshb8.h` source files. 
+Python module for accessing mesh and solution files in Gamma Mesh Format 
+(`.mesh`/`.meshb`/`.sol`/`.solb`). Implemented by compiling the vendored
+ [libMeshb](https://github.com/LoicMarechal/libMeshb) source 
+ (`libmeshb8.c` / `libmeshb8.h`) directly and binding via Python ctypes.
 
 ## Installation
 
-`pyLibMeshb` ships as prebuilt wheels for **Linux** and **Windows** (x86_64), attached to each [GitHub Release](https://github.com/vtpasquale/pyLibMeshb/releases). No C compiler is required to install — the compiled library is bundled inside the wheel.
+`pyLibMeshb` ships as prebuilt wheels for **Linux**, **macOS**, and **Windows** (x86_64), attached to each [GitHub Release](https://github.com/vtpasquale/pyLibMeshb/releases). No C compiler is required to install — the compiled library is bundled inside the wheel.
 
 ### Option 1: Install directly from a GitHub Release (recommended)
 
