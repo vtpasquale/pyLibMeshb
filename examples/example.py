@@ -50,5 +50,4 @@ sol2 = read("roundtrip.solb", types=["sol_at_vertices"])
 print(f"roundtrip.solb scalars: {sol2['sol_at_vertices']['values'].shape[1]}, "
       f"lines: {sol2['sol_at_vertices']['values'].shape[0]}")
 
-# What entities does this file actually contain?
-print("Types present in roundtrip.meshb:", list_types("roundtrip.meshb"))
+mesh_info("roundtrip.solb")
