@@ -7,20 +7,31 @@ Created on Tue Aug  4 07:05:33 2026
 """
 
 import numpy as np
-from pylibmeshb.libMeshb import read_mesh_2d, read_solution, write_mesh_2d, write_solution
+from pyLibMeshb.libMeshb import list_types, read, write, mesh_info
 
-mesh = read_mesh_2d("naca0012.meshb")
+types_all = list_types()
 
-print(f"File version : {mesh['version']}")
-print(f"Dimension    : {mesh['dim']}")
-print(f"Vertices     : {mesh['vertices'].shape[0]}")
-print(f"Triangles    : {mesh['triangles'].shape[0]}")
-print(f"Boundary edges: {mesh['edges'].shape[0]}")
+types_file = list_types("naca0012.meshb")
+
+mesh_info("naca0012.meshb")
+
+mesh = read("naca0012.meshb")
+
+# mesh = read("naca0012.meshb", types=["vertices", "triangles", "edges"])
+
 
 # Round-trip demo: write it back out and read it again.
-write_mesh_2d("roundtrip.meshb", mesh["vertices"], mesh["triangles"], mesh["edges"], version=3)
-check = read_mesh_2d("roundtrip.meshb")
+write("roundtrip.meshb",
+      {"vertices": mesh["vertices"], "triangles": mesh["triangles"], "edges": mesh["edges"]},
+      version=3, dim=2)
+check = read("roundtrip.meshb", types=["vertices"])
 print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertices"]))
+
+
+# write("roundtrip.mesh",
+#       {"vertices": mesh["vertices"], "triangles": mesh["triangles"], "edges": mesh["edges"]},
+#       version=3, dim=2)
+
 
 # Solution demo: 3 synthetic scalar fields (e.g. density, pressure, Mach).
 n = mesh["vertices"].shape[0]
@@ -29,10 +40,15 @@ demo_values = np.column_stack([
     np.linspace(101325.0, 90000.0, n),
     np.linspace(0.1, 3.5, n),
 ])
-write_solution("roundtrip.solb", demo_values, version=3, dim=2)
-sol = read_solution("roundtrip.solb")
-print(f"Solution scalars: {sol['n_scalars']}, lines: {sol['values'].shape[0]}")
-print("Solution round-trip matches:", np.allclose(demo_values, sol["values"]))
+write("roundtrip.solb", {"sol_at_vertices": {"values": demo_values}}, version=3, dim=2)
+sol = read("roundtrip.solb", types=["sol_at_vertices"])
+print(f"Solution scalars: {sol['sol_at_vertices']['values'].shape[1]}, "
+      f"lines: {sol['sol_at_vertices']['values'].shape[0]}")
+print("Solution round-trip matches:", np.allclose(demo_values, sol["sol_at_vertices"]["values"]))
 
-sol2 = read_solution("roundtrip.solb")
-print(f"roundtrip.solb scalars: {sol2['n_scalars']}, lines: {sol2['values'].shape[0]}")
+sol2 = read("roundtrip.solb", types=["sol_at_vertices"])
+print(f"roundtrip.solb scalars: {sol2['sol_at_vertices']['values'].shape[1]}, "
+      f"lines: {sol2['sol_at_vertices']['values'].shape[0]}")
+
+# What entities does this file actually contain?
+print("Types present in roundtrip.meshb:", list_types("roundtrip.meshb"))

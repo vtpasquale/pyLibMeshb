@@ -1,45 +1,29 @@
 """
-libMeshb.py
------------
-Read/write 2D .mesh/.meshb mesh files (Vertices, Triangles, Edges) and
-.sol/.solb solution files (arbitrary number of scalar fields) using the
-LibMeshb C library (libmeshb8.c / libmeshb8.h) via ctypes, driven entirely
-through GmfGetBlock / GmfSetBlock (bulk block I/O, not per-line).
+libMeshb_generic.py
+--------------------
+Generic dictionary-driven read/write for .mesh/.meshb and .sol/.solb files
+via the LibMeshb C library (libmeshb8.c / libmeshb8.h), replacing per-type
+functions (read_mesh_2d, write_mesh_2d, read_solution, write_solution, ...)
+with three calls:
 
-Mesh I/O
---------
-read_mesh_2d(path)                             -> dict of numpy arrays
-write_mesh_2d(path, vertices, triangles, edges, version=3)
+    list_types(path=None)        -> list of supported/present entity names
+    read(path, types=None)       -> dict of {name: array or {'values','field_types'}}
+    write(path, data, version, dim) -> None
 
-Solution I/O
-------------
-read_solution(path, keyword='GmfSolAtVertices') -> dict with an (N, n_scalars) array
-write_solution(path, values, version=3, dim=2, keyword='GmfSolAtVertices')
+Design
+------
+A single registry `TYPES` maps a friendly entity name to a spec describing
+its libMeshb keyword and column layout:
 
-Notes on GmfSetBlock/GmfGetBlock argument forms (from libmeshb8.c / libMeshb docs):
-    Scalar field group : <type tag>, &first_elem, &last_elem
-    Vector field group : <type tag + 4 (Vec)>, <count>, &first_row, &last_row
-        (the "Vec" form treats a contiguous 2D row-major buffer as
-        `count` interleaved scalar columns -- perfect for a user-defined
-        number of solution scalars stored as one (N, n_scalars) array.)
+    kind='vertex'   : dim float coordinate columns + 1 int ref column
+    kind='element'  : n_verts int index columns (+ 1 int ref column if has_ref)
+    kind='solution' : sol_size real columns, where sol_size and the per-field
+                      type table (Sca/Vec/SymMat/Mat) come straight from
+                      GmfStatKwd -- so ANY solution keyword works, not just
+                      all-scalar ones.
 
-Solution keyword header must be declared with GmfSetKwd(idx, Kwd, N,
-NumberOfTypes, TypeTable) where TypeTable is an int* to NumberOfTypes
-entries, each GmfSca(1)/GmfVec(2)/GmfSymMat(3)/GmfMat(4). For n_scalars
-independent scalar fields, TypeTable = [GmfSca] * n_scalars, which makes
-SolSize == n_scalars.
-
-Integer width and float precision depend on the file version:
-    version 1        : 32-bit ints, 32-bit floats
-    version 2 or 3    : 32-bit ints, 64-bit floats
-    version 4         : 64-bit ints, 64-bit floats
-
-Requirements:
-    - numpy
-    - A compiled `_libmeshb.so` (Linux) or `_libmeshb.dll` (Windows) and
-      `libmeshb8.h` must be present inside the installed pyLibMeshb
-      package (bundled automatically by `pip install`/wheel builds via
-      setup.py's build_ext step -- no compiler needed at import time).
+Adding a new element type later (e.g. GmfPolygons) means adding one line to
+TYPES, not writing a new read_*/write_* function pair.
 """
 
 import ctypes
@@ -48,49 +32,59 @@ import sys
 import importlib.resources
 from ctypes import c_int, c_int64, c_void_p, byref
 import numpy as np
-   
-# #define macros in libmeshb8.h -- stable, explicit constants.
-GmfRead = 1
-GmfWrite = 2
-GmfSca = 1
-GmfVec = 2
-GmfSymMat = 3
-GmfMat = 4
-GmfFloat = 8
-GmfDouble = 9
-GmfInt = 10
-GmfLong = 11
-GmfFloatVec = 12
-GmfDoubleVec = 13
-GmfIntVec = 14
-GmfLongVec = 15
+
+GmfRead, GmfWrite = 1, 2
+GmfSca, GmfVec, GmfSymMat, GmfMat = 1, 2, 3, 4
+GmfFloat, GmfDouble, GmfInt, GmfLong = 8, 9, 10, 11
+GmfFloatVec, GmfDoubleVec, GmfIntVec, GmfLongVec = 12, 13, 14, 15
 
 # ----------------------------------------------------------------------------
-# 1. Parse the GmfKwdCod enum straight out of the header so keyword indices
-#    can never drift out of sync with whatever version of the header you have.
+# Entity registry -- the ONLY place that needs to change to support a new
+# mesh/solution keyword.
+# ----------------------------------------------------------------------------
+TYPES = {
+    "vertices":              {"kwd": "GmfVertices",       "kind": "vertex"},
+
+    "edges":                 {"kwd": "GmfEdges",           "kind": "element", "n_verts": 2, "has_ref": True},
+    "triangles":              {"kwd": "GmfTriangles",       "kind": "element", "n_verts": 3, "has_ref": True},
+    "quadrilaterals":         {"kwd": "GmfQuadrilaterals",  "kind": "element", "n_verts": 4, "has_ref": True},
+    "tetrahedra":             {"kwd": "GmfTetrahedra",      "kind": "element", "n_verts": 4, "has_ref": True},
+    "pyramids":               {"kwd": "GmfPyramids",        "kind": "element", "n_verts": 5, "has_ref": True},
+    "prisms":                 {"kwd": "GmfPrisms",          "kind": "element", "n_verts": 6, "has_ref": True},
+    "hexahedra":               {"kwd": "GmfHexahedra",       "kind": "element", "n_verts": 8, "has_ref": True},
+    "corners":                 {"kwd": "GmfCorners",         "kind": "element", "n_verts": 1, "has_ref": False},
+    "ridges":                  {"kwd": "GmfRidges",          "kind": "element", "n_verts": 1, "has_ref": False},
+
+    "sol_at_vertices":         {"kwd": "GmfSolAtVertices",       "kind": "solution"},
+    "sol_at_edges":            {"kwd": "GmfSolAtEdges",          "kind": "solution"},
+    "sol_at_triangles":        {"kwd": "GmfSolAtTriangles",      "kind": "solution"},
+    "sol_at_quadrilaterals":   {"kwd": "GmfSolAtQuadrilaterals", "kind": "solution"},
+    "sol_at_tetrahedra":       {"kwd": "GmfSolAtTetrahedra",     "kind": "solution"},
+    "sol_at_prisms":           {"kwd": "GmfSolAtPrisms",         "kind": "solution"},
+    "sol_at_hexahedra":        {"kwd": "GmfSolAtHexahedra",      "kind": "solution"},
+    "dsol_at_vertices":        {"kwd": "GmfDSolAtVertices",      "kind": "solution"},
+    "isol_at_vertices":        {"kwd": "GmfISolAtVertices",      "kind": "solution"},
+    "isol_at_edges":           {"kwd": "GmfISolAtEdges",         "kind": "solution"},
+    "isol_at_triangles":       {"kwd": "GmfISolAtTriangles",     "kind": "solution"},
+    "isol_at_quadrilaterals":  {"kwd": "GmfISolAtQuadrilaterals","kind": "solution"},
+    "isol_at_tetrahedra":      {"kwd": "GmfISolAtTetrahedra",    "kind": "solution"},
+    "isol_at_prisms":          {"kwd": "GmfISolAtPrisms",        "kind": "solution"},
+    "isol_at_hexahedra":       {"kwd": "GmfISolAtHexahedra",     "kind": "solution"},
+}
+
+# ----------------------------------------------------------------------------
+# Parse GmfKwdCod enum straight out of the header so keyword indices never
+# drift out of sync with the installed library.
 # ----------------------------------------------------------------------------
 def parse_keyword_enum(header_path):
     text = header_path.read_text()
-    
     m = re.search(r"enum\s+GmfKwdCod\s*\{(.*?)\};", text, re.S)
     if not m:
         raise RuntimeError("Could not locate 'enum GmfKwdCod' in header")
-
-    body = m.group(1)
-    names = [tok.strip() for tok in body.split(",")]
-    names = [n for n in names if n]
+    names = [tok.strip() for tok in m.group(1).split(",") if tok.strip()]
     return {name: idx for idx, name in enumerate(names)}
 
 
-# ----------------------------------------------------------------------------
-# 2. Compile libmeshb8.c into a shared library if it hasn't been built yet.
-# ----------------------------------------------------------------------------
-# This is now part of the module build system
-
-
-# ----------------------------------------------------------------------------
-# 3. ctypes bindings
-# ----------------------------------------------------------------------------
 class LibMeshb:
     def __init__(self, lib_path):
         self.lib = ctypes.CDLL(lib_path)
@@ -103,21 +97,15 @@ class LibMeshb:
         self.lib.GmfSetKwd.restype = c_int
         self.lib.GmfGetFloatPrecision.restype = c_int
 
-    # -- open / close --------------------------------------------------
     def open_mesh_read(self, path):
-        ver = c_int(0)
-        dim = c_int(0)
-        handle = self.lib.GmfOpenMesh(
-            path.encode("utf-8"), c_int(GmfRead), byref(ver), byref(dim)
-        )
+        ver, dim = c_int(0), c_int(0)
+        handle = self.lib.GmfOpenMesh(path.encode("utf-8"), c_int(GmfRead), byref(ver), byref(dim))
         if handle == 0:
             raise IOError(f"GmfOpenMesh failed to open '{path}'")
         return handle, ver.value, dim.value
 
     def open_mesh_write(self, path, version, dim):
-        handle = self.lib.GmfOpenMesh(
-            path.encode("utf-8"), c_int(GmfWrite), c_int(version), c_int(dim)
-        )
+        handle = self.lib.GmfOpenMesh(path.encode("utf-8"), c_int(GmfWrite), c_int(version), c_int(dim))
         if handle == 0:
             raise IOError(f"GmfOpenMesh failed to create '{path}'")
         return handle
@@ -125,19 +113,14 @@ class LibMeshb:
     def close_mesh(self, handle):
         self.lib.GmfCloseMesh(c_int64(handle))
 
-    # -- keyword header --------------------------------------------------
     def stat_kwd(self, handle, kwd):
         return self.lib.GmfStatKwd(c_int64(handle), c_int(kwd))
 
     def stat_kwd_solution(self, handle, kwd, max_types=1000):
-        n_types = c_int(0)
-        sol_size = c_int(0)
+        n_types, sol_size = c_int(0), c_int(0)
         type_tab = (c_int * max_types)()
-        n_lines = self.lib.GmfStatKwd(
-            c_int64(handle), c_int(kwd), byref(n_types), byref(sol_size), type_tab
-        )
-        types = list(type_tab[: n_types.value])
-        return n_lines, n_types.value, sol_size.value, types
+        n_lines = self.lib.GmfStatKwd(c_int64(handle), c_int(kwd), byref(n_types), byref(sol_size), type_tab)
+        return n_lines, n_types.value, sol_size.value, list(type_tab[: n_types.value])
 
     def set_kwd(self, handle, kwd, n_lines):
         ok = self.lib.GmfSetKwd(c_int64(handle), c_int(kwd), c_int64(n_lines))
@@ -146,55 +129,43 @@ class LibMeshb:
 
     def set_kwd_solution(self, handle, kwd, n_lines, type_tab):
         type_arr = (c_int * len(type_tab))(*type_tab)
-        ok = self.lib.GmfSetKwd(
-            c_int64(handle), c_int(kwd), c_int64(n_lines),
-            c_int(len(type_tab)), type_arr,
-        )
+        ok = self.lib.GmfSetKwd(c_int64(handle), c_int(kwd), c_int64(n_lines), c_int(len(type_tab)), type_arr)
         if not ok and n_lines > 0:
             raise RuntimeError(f"GmfSetKwd (solution) failed for keyword id {kwd}")
 
     def goto_kwd(self, handle, kwd):
-        ok = self.lib.GmfGotoKwd(c_int64(handle), c_int(kwd))
-        if ok == 0:
+        if not self.lib.GmfGotoKwd(c_int64(handle), c_int(kwd)):
             raise RuntimeError(f"GmfGotoKwd failed for keyword id {kwd}")
 
     def float_precision(self, handle):
         return self.lib.GmfGetFloatPrecision(c_int64(handle))
 
-    # -- bulk block I/O --------------------------------------------------
     @staticmethod
-    def _build_block_argv(handle, kwd, n_lines, fields, begin=1):
-        argv = [
-            c_int64(handle), c_int(kwd),
-            c_int64(begin), c_int64(begin + n_lines - 1),
-            c_int(0), c_void_p(None), c_void_p(None),
-        ]
+    def _build_block_argv(handle, kwd, n_lines, fields):
+        argv = [c_int64(handle), c_int(kwd), c_int64(1), c_int64(n_lines),
+                c_int(0), c_void_p(None), c_void_p(None)]
         for field in fields:
             if field[0] == "scalar":
                 _, type_code, arr = field
-                first_addr = arr.ctypes.data
-                last_addr = first_addr + (n_lines - 1) * arr.itemsize if n_lines > 1 else first_addr
-                argv += [c_int(type_code), c_void_p(first_addr), c_void_p(last_addr)]
+                first = arr.ctypes.data
+                last = first + (n_lines - 1) * arr.itemsize if n_lines > 1 else first
+                argv += [c_int(type_code), c_void_p(first), c_void_p(last)]
             elif field[0] == "vec":
                 _, type_code_vec, count, arr2d = field
-                row_stride = arr2d.strides[0]
-                first_addr = arr2d.ctypes.data
-                last_addr = first_addr + (n_lines - 1) * row_stride if n_lines > 1 else first_addr
-                argv += [c_int(type_code_vec), c_int(count), c_void_p(first_addr), c_void_p(last_addr)]
+                stride = arr2d.strides[0]
+                first = arr2d.ctypes.data
+                last = first + (n_lines - 1) * stride if n_lines > 1 else first
+                argv += [c_int(type_code_vec), c_int(count), c_void_p(first), c_void_p(last)]
             else:
                 raise ValueError(f"Unknown field kind: {field[0]}")
         return argv
 
     def get_block(self, handle, kwd, n_lines, fields):
-        argv = self._build_block_argv(handle, kwd, n_lines, fields)
-        ok = self.lib.GmfGetBlock(*argv)
-        if not ok:
+        if not self.lib.GmfGetBlock(*self._build_block_argv(handle, kwd, n_lines, fields)):
             raise RuntimeError(f"GmfGetBlock failed for keyword id {kwd}")
 
     def set_block(self, handle, kwd, n_lines, fields):
-        argv = self._build_block_argv(handle, kwd, n_lines, fields)
-        ok = self.lib.GmfSetBlock(*argv)
-        if not ok:
+        if not self.lib.GmfSetBlock(*self._build_block_argv(handle, kwd, n_lines, fields)):
             raise RuntimeError(f"GmfSetBlock failed for keyword id {kwd}")
 
 
@@ -207,264 +178,268 @@ def vec_field(type_code_vec, count, arr2d):
 
 
 # ----------------------------------------------------------------------------
-# 4. Mesh reader (Vertices, Triangles, Edges) -- GmfGetBlock
+# Module setup
 # ----------------------------------------------------------------------------
-def read_mesh_2d(path):
+HEADER_PATH = importlib.resources.files("pyLibMeshb") / "libmeshb8.h"
+KWD = parse_keyword_enum(HEADER_PATH)
+_suffix = "_libmeshb.dll" if sys.platform.startswith("win") else "_libmeshb.so"
+_lib_path = importlib.resources.files("pyLibMeshb") / _suffix
+if not _lib_path.is_file():
+    raise ImportError(f"Compiled library '{_suffix}' not found in pyLibMeshb package.")
+LM = LibMeshb(str(_lib_path))
+
+_TYPE_WIDTH = {GmfSca: 1, GmfVec: None, GmfSymMat: None, GmfMat: None}  # Vec/SymMat/Mat widths depend on dim
+
+
+def _field_width(type_code, dim):
+    if type_code == GmfSca:
+        return 1
+    if type_code == GmfVec:
+        return dim
+    if type_code == GmfSymMat:
+        return dim * (dim + 1) // 2
+    if type_code == GmfMat:
+        return dim * dim
+    raise ValueError(f"Unknown solution field type code {type_code}")
+
+
+# ----------------------------------------------------------------------------
+# 1. list_types
+# ----------------------------------------------------------------------------
+def list_types(path=None):
     """
-    Returns:
-        {
-          'version': int, 'dim': int,
-          'vertices': (N,3) float64 array   -- x, y, ref
-          'triangles': (M,4) int64 array    -- v0, v1, v2, ref (1-based)
-          'edges': (K,3) int64 array        -- v0, v1, ref (1-based, boundary)
-        }
+    With no path: return every entity name this module knows how to read/write.
+    With a path: open the file and return only the entity names actually
+    present (line count > 0).
+    """
+    if path is None:
+        return sorted(TYPES.keys())
+
+    handle, ver, dim = LM.open_mesh_read(path)
+    try:
+        present = []
+        for name, spec in TYPES.items():
+            kwd = KWD[spec["kwd"]]
+            n = LM.stat_kwd(handle, kwd)
+            if n > 0:
+                present.append(name)
+        return sorted(present)
+    finally:
+        LM.close_mesh(handle)
+
+
+# ----------------------------------------------------------------------------
+# 2. read
+# ----------------------------------------------------------------------------
+def read(path, types=None):
+    """
+    Read one or more entity types from a .mesh/.meshb or .sol/.solb file.
+
+    types : iterable of names from TYPES (e.g. ['vertices','triangles']).
+            If None, auto-detects every registered type present in the file.
+
+    Returns a dict:
+        {'version': int, 'dim': int,
+         'vertices': (N, dim+1) float64 array,      # coords..., ref
+         'triangles': (M, n_verts[+1]) int64 array, # v0..vk[, ref]
+         'sol_at_vertices': {'values': (N, sol_size) float64,
+                              'field_types': [GmfSca, GmfVec, ...]},
+         ...}
     """
     handle, ver, dim = LM.open_mesh_read(path)
-    if dim != 2:
-        print(f"Warning: file reports dimension={dim}, expected 2", file=sys.stderr)
+    if types is None:
+        types = [name for name, spec in TYPES.items()
+                  if LM.stat_kwd(handle, KWD[spec["kwd"]]) > 0]
 
     float_bits = LM.float_precision(handle)
     float_dtype = np.float32 if float_bits == 32 else np.float64
     float_code = GmfFloat if float_bits == 32 else GmfDouble
-
+    float_code_vec = GmfFloatVec if float_bits == 32 else GmfDoubleVec
     int_dtype = np.int32 if ver < 4 else np.int64
     int_code = GmfInt if ver < 4 else GmfLong
 
+    result = {"version": ver, "dim": dim}
     try:
-        n_vert = LM.stat_kwd(handle, KWD["GmfVertices"])
-        n_tri = LM.stat_kwd(handle, KWD["GmfTriangles"])
-        n_edg = LM.stat_kwd(handle, KWD["GmfEdges"])
+        for name in types:
+            spec = TYPES[name]
+            kwd = KWD[spec["kwd"]]
 
-        vertices = np.empty((n_vert, 3), dtype=np.float64)
-        if n_vert > 0:
-            x = np.empty(n_vert, dtype=float_dtype)
-            y = np.empty(n_vert, dtype=float_dtype)
-            ref = np.empty(n_vert, dtype=int_dtype)
-            LM.goto_kwd(handle, KWD["GmfVertices"])
-            LM.get_block(
-                handle, KWD["GmfVertices"], n_vert,
-                [scalar_field(float_code, x), scalar_field(float_code, y), scalar_field(int_code, ref)],
-            )
-            vertices[:, 0] = x
-            vertices[:, 1] = y
-            vertices[:, 2] = ref
+            if spec["kind"] == "vertex":
+                n = LM.stat_kwd(handle, kwd)
+                arr = np.empty((n, dim + 1), dtype=np.float64)
+                if n > 0:
+                    cols = [np.empty(n, dtype=float_dtype) for _ in range(dim)]
+                    ref = np.empty(n, dtype=int_dtype)
+                    LM.goto_kwd(handle, kwd)
+                    LM.get_block(handle, kwd, n,
+                                 [scalar_field(float_code, c) for c in cols] +
+                                 [scalar_field(int_code, ref)])
+                    for i, c in enumerate(cols):
+                        arr[:, i] = c
+                    arr[:, dim] = ref
+                result[name] = arr
 
-        triangles = np.empty((n_tri, 4), dtype=np.int64)
-        if n_tri > 0:
-            v0, v1, v2, ref = (np.empty(n_tri, dtype=int_dtype) for _ in range(4))
-            LM.goto_kwd(handle, KWD["GmfTriangles"])
-            LM.get_block(
-                handle, KWD["GmfTriangles"], n_tri,
-                [scalar_field(int_code, v0), scalar_field(int_code, v1),
-                 scalar_field(int_code, v2), scalar_field(int_code, ref)],
-            )
-            triangles[:, 0] = v0
-            triangles[:, 1] = v1
-            triangles[:, 2] = v2
-            triangles[:, 3] = ref
+            elif spec["kind"] == "element":
+                n = LM.stat_kwd(handle, kwd)
+                n_cols = spec["n_verts"] + (1 if spec["has_ref"] else 0)
+                arr = np.empty((n, n_cols), dtype=np.int64)
+                if n > 0:
+                    cols = [np.empty(n, dtype=int_dtype) for _ in range(n_cols)]
+                    LM.goto_kwd(handle, kwd)
+                    LM.get_block(handle, kwd, n, [scalar_field(int_code, c) for c in cols])
+                    for i, c in enumerate(cols):
+                        arr[:, i] = c
+                result[name] = arr
 
-        edges = np.empty((n_edg, 3), dtype=np.int64)
-        if n_edg > 0:
-            v0, v1, ref = (np.empty(n_edg, dtype=int_dtype) for _ in range(3))
-            LM.goto_kwd(handle, KWD["GmfEdges"])
-            LM.get_block(
-                handle, KWD["GmfEdges"], n_edg,
-                [scalar_field(int_code, v0), scalar_field(int_code, v1), scalar_field(int_code, ref)],
-            )
-            edges[:, 0] = v0
-            edges[:, 1] = v1
-            edges[:, 2] = ref
-
+            elif spec["kind"] == "solution":
+                n, n_types_, sol_size, field_types = LM.stat_kwd_solution(handle, kwd)
+                if n == 0:
+                    result[name] = {"values": np.empty((0, 0)), "field_types": field_types}
+                    continue
+                buf = np.empty((n, sol_size), dtype=float_dtype)
+                LM.goto_kwd(handle, kwd)
+                LM.get_block(handle, kwd, n, [vec_field(float_code_vec, sol_size, buf)])
+                result[name] = {"values": buf.astype(np.float64, copy=False),
+                                 "field_types": field_types}
+            else:
+                raise ValueError(f"Unknown kind for type '{name}'")
     finally:
         LM.close_mesh(handle)
 
-    return {"version": ver, "dim": dim, "vertices": vertices, "triangles": triangles, "edges": edges}
+    return result
 
 
 # ----------------------------------------------------------------------------
-# 5. Mesh writer (Vertices, Triangles, Edges) -- GmfSetBlock
+# 3. write
 # ----------------------------------------------------------------------------
-def write_mesh_2d(path, vertices, triangles, edges, version=3):
+def write(path, data, version=3, dim=None):
     """
-    vertices  : array-like (Nv,3)  columns x, y, ref
-    triangles : array-like (Nt,4)  columns v0, v1, v2, ref (1-based)
-    edges     : array-like (Ne,3)  columns v0, v1, ref (1-based, boundary)
-    version   : meshb file format version (1-4). 3 is a solid default:
-                64-bit-safe file size, 64-bit reals, 32-bit indices.
-    """
-    vertices = np.asarray(vertices, dtype=np.float64)
-    triangles = np.asarray(triangles, dtype=np.int64)
-    edges = np.asarray(edges, dtype=np.int64)
+    Write one or more entity types to a .mesh/.meshb or .sol/.solb file.
 
-    dim = 2
+    data : dict using the same shapes as returned by read(), e.g.
+        {'vertices': (N, dim+1) array, 'triangles': (M, 4) array,
+         'sol_at_vertices': {'values': (N, sol_size) array,
+                              'field_types': [GmfSca]*sol_size}}   # optional
+    version : file format version (1-4).
+    dim : spatial dimension; if None, inferred from data['vertices'] width - 1,
+          else defaults to 2.
+    """
+    if dim is None:
+        if "vertices" in data:
+            dim = data["vertices"].shape[1] - 1
+        else:
+            dim = 2
+
     handle = LM.open_mesh_write(path, version, dim)
-
     float_dtype = np.float32 if version == 1 else np.float64
     float_code = GmfFloat if version == 1 else GmfDouble
+    float_code_vec = GmfFloatVec if version == 1 else GmfDoubleVec
     int_dtype = np.int32 if version < 4 else np.int64
     int_code = GmfInt if version < 4 else GmfLong
 
     try:
-        n_vert = vertices.shape[0]
-        if n_vert > 0:
-            x = np.ascontiguousarray(vertices[:, 0], dtype=float_dtype)
-            y = np.ascontiguousarray(vertices[:, 1], dtype=float_dtype)
-            ref = np.ascontiguousarray(vertices[:, 2], dtype=int_dtype)
-            LM.set_kwd(handle, KWD["GmfVertices"], n_vert)
-            LM.set_block(
-                handle, KWD["GmfVertices"], n_vert,
-                [scalar_field(float_code, x), scalar_field(float_code, y), scalar_field(int_code, ref)],
-            )
+        for name, payload in data.items():
+            if name in ("version", "dim"):
+                continue
+            spec = TYPES[name]
+            kwd = KWD[spec["kwd"]]
 
-        n_tri = triangles.shape[0]
-        if n_tri > 0:
-            cols = [np.ascontiguousarray(triangles[:, i], dtype=int_dtype) for i in range(4)]
-            LM.set_kwd(handle, KWD["GmfTriangles"], n_tri)
-            LM.set_block(
-                handle, KWD["GmfTriangles"], n_tri,
-                [scalar_field(int_code, c) for c in cols],
-            )
+            if spec["kind"] == "vertex":
+                arr = np.asarray(payload, dtype=np.float64)
+                n = arr.shape[0]
+                if n == 0:
+                    continue
+                cols = [np.ascontiguousarray(arr[:, i], dtype=float_dtype) for i in range(dim)]
+                ref = np.ascontiguousarray(arr[:, dim], dtype=int_dtype)
+                LM.set_kwd(handle, kwd, n)
+                LM.set_block(handle, kwd, n,
+                             [scalar_field(float_code, c) for c in cols] +
+                             [scalar_field(int_code, ref)])
 
-        n_edg = edges.shape[0]
-        if n_edg > 0:
-            cols = [np.ascontiguousarray(edges[:, i], dtype=int_dtype) for i in range(3)]
-            LM.set_kwd(handle, KWD["GmfEdges"], n_edg)
-            LM.set_block(
-                handle, KWD["GmfEdges"], n_edg,
-                [scalar_field(int_code, c) for c in cols],
-            )
+            elif spec["kind"] == "element":
+                arr = np.asarray(payload, dtype=np.int64)
+                n = arr.shape[0]
+                if n == 0:
+                    continue
+                n_cols = spec["n_verts"] + (1 if spec["has_ref"] else 0)
+                cols = [np.ascontiguousarray(arr[:, i], dtype=int_dtype) for i in range(n_cols)]
+                LM.set_kwd(handle, kwd, n)
+                LM.set_block(handle, kwd, n, [scalar_field(int_code, c) for c in cols])
+
+            elif spec["kind"] == "solution":
+                values = np.atleast_2d(np.asarray(payload["values"], dtype=np.float64))
+                n, sol_size = values.shape
+                if n == 0:
+                    continue
+                field_types = payload.get("field_types") or [GmfSca] * sol_size
+                LM.set_kwd_solution(handle, kwd, n, field_types)
+                buf = np.ascontiguousarray(values, dtype=float_dtype)
+                LM.set_block(handle, kwd, n, [vec_field(float_code_vec, sol_size, buf)])
+            else:
+                raise ValueError(f"Unknown kind for type '{name}'")
     finally:
         LM.close_mesh(handle)
 
-
-# ----------------------------------------------------------------------------
-# 6. Solution reader/writer (.sol / .solb) -- arbitrary number of scalars
-# ----------------------------------------------------------------------------
-def read_solution(path, keyword="GmfSolAtVertices"):
+def mesh_info(path):
     """
-    Reads a solution file with an arbitrary number of independent scalar
-    fields (each declared as GmfSca in the file's type table).
+    Query a mesh/solution file and report its contents.
 
-    Returns:
-        {
-          'version': int, 'dim': int,
-          'n_scalars': int,
-          'values': (N, n_scalars) float64 array
-        }
+    Prints, for every registered entity type present in the file, its name,
+    kind (vertex/element/solution), and number of entities (lines). For
+    solution-kind entities it also prints the number of real values per line
+    (sol_size) and the per-field type codes (Sca=1, Vec=2, SymMat=3, Mat=4).
+
+    Returns
+    -------
+    (version, dim) : tuple of int
     """
     handle, ver, dim = LM.open_mesh_read(path)
-    kwd = KWD[keyword]
-
-    float_bits = LM.float_precision(handle)
-    float_dtype = np.float32 if float_bits == 32 else np.float64
-    float_code_vec = GmfFloatVec if float_bits == 32 else GmfDoubleVec
-
     try:
-        n_lines, n_types, sol_size, types = LM.stat_kwd_solution(handle, kwd)
-        if n_lines == 0:
-            return {"version": ver, "dim": dim, "n_scalars": 0, "values": np.empty((0, 0))}
+        print(f"File          : {path}")
+        print(f"Version       : {ver}")
+        print(f"Dimension     : {dim}")
+        print(f"{'Type':<25}{'Kind':<12}{'Count':>10}   Details")
+        print("-" * 70)
 
-        if any(t != GmfSca for t in types):
-            raise ValueError(
-                f"'{keyword}' contains non-scalar fields (types={types}); "
-                "this reader expects only GmfSca entries."
-            )
-        n_scalars = sol_size  # each GmfSca contributes exactly one real
+        for name, spec in TYPES.items():
+            kwd = KWD[spec["kwd"]]
 
-        buf = np.empty((n_lines, n_scalars), dtype=float_dtype)
-        LM.goto_kwd(handle, kwd)
-        LM.get_block(handle, kwd, n_lines, [vec_field(float_code_vec, n_scalars, buf)])
-
-        values = buf.astype(np.float64, copy=False)
+            if spec["kind"] == "solution":
+                n_lines, n_types_, sol_size, field_types = LM.stat_kwd_solution(handle, kwd)
+                if n_lines > 0:
+                    print(f"{name:<25}{spec['kind']:<12}{n_lines:>10}   "
+                          f"sol_size={sol_size}, field_types={field_types}")
+            else:
+                n_lines = LM.stat_kwd(handle, kwd)
+                if n_lines > 0:
+                    print(f"{name:<25}{spec['kind']:<12}{n_lines:>10}")
     finally:
         LM.close_mesh(handle)
 
-    return {"version": ver, "dim": dim, "n_scalars": n_scalars, "values": values}
-
-
-def write_solution(path, values, version=3, dim=2, keyword="GmfSolAtVertices"):
-    """
-    Writes a solution file with an arbitrary number of independent scalar
-    fields, one GmfSca entry per column.
-
-    values  : array-like (N, n_scalars)
-    version : file format version (1-4); governs real/int precision.
-    dim     : spatial dimension the solution refers to (2 or 3); mandatory
-              header field for .sol/.solb files, same as for .mesh/.meshb.
-    keyword : solution keyword, e.g. 'GmfSolAtVertices', 'GmfSolAtTriangles'.
-    """
-    values = np.atleast_2d(np.asarray(values, dtype=np.float64))
-    n_lines, n_scalars = values.shape
-
-    kwd = KWD[keyword]
-    handle = LM.open_mesh_write(path, version, dim)
-
-    float_dtype = np.float32 if version == 1 else np.float64
-    float_code_vec = GmfFloatVec if version == 1 else GmfDoubleVec
-
-    try:
-        if n_lines > 0:
-            type_tab = [GmfSca] * n_scalars
-            LM.set_kwd_solution(handle, kwd, n_lines, type_tab)
-
-            buf = np.ascontiguousarray(values, dtype=float_dtype)
-            LM.set_block(handle, kwd, n_lines, [vec_field(float_code_vec, n_scalars, buf)])
-    finally:
-        LM.close_mesh(handle)
-
+    return ver, dim
 
 # ----------------------------------------------------------------------------
-# Module-level setup: parse header, build/load library
-# ----------------------------------------------------------------------------
-HEADER_PATH = importlib.resources.files("pyLibMeshb") / "libmeshb8.h"
-KWD = parse_keyword_enum(HEADER_PATH)
-
-_suffix = "_libmeshb.dll" if sys.platform.startswith("win") else "_libmeshb.so"
-_lib_path = importlib.resources.files("pyLibMeshb") / _suffix
-
-if not _lib_path.is_file():
-    raise ImportError(
-        f"Compiled library '{_suffix}' not found in pyLibMeshb package. "
-        "Was the wheel built with the matching platform's build_ext step?"
-    )
-
-LM = LibMeshb(str(_lib_path))
-
-# ----------------------------------------------------------------------------
-# Example / CLI entry point
+# Example
 # ----------------------------------------------------------------------------
 if __name__ == "__main__":
-    # if len(sys.argv) < 2:
-    #     print("Usage: python meshb_io.py <mesh_file.mesh[b]> [solution_file.sol[b]]")
-    #     sys.exit(1)
+    print("Registered types:", list_types())
 
-    # mesh = read_mesh_2d(sys.argv[1])
-    
-    mesh = read_mesh_2d("naca0012.meshb")
-    
-    print(f"File version : {mesh['version']}")
-    print(f"Dimension    : {mesh['dim']}")
-    print(f"Vertices     : {mesh['vertices'].shape[0]}")
-    print(f"Triangles    : {mesh['triangles'].shape[0]}")
-    print(f"Boundary edges: {mesh['edges'].shape[0]}")
+    mesh = read("naca0012.meshb")
+    print("Types present in file:", list_types("naca0012.meshb"))
+    print("Vertices:", mesh["vertices"].shape, "Triangles:", mesh["triangles"].shape)
 
-    # Round-trip demo: write it back out and read it again.
-    write_mesh_2d("roundtrip.meshb", mesh["vertices"], mesh["triangles"], mesh["edges"], version=3)
-    check = read_mesh_2d("roundtrip.meshb")
-    print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertices"]))
-
-    # Solution demo: 3 synthetic scalar fields (e.g. density, pressure, Mach).
     n = mesh["vertices"].shape[0]
     demo_values = np.column_stack([
         np.linspace(1.0, 2.0, n),
         np.linspace(101325.0, 90000.0, n),
         np.linspace(0.1, 3.5, n),
     ])
-    write_solution("roundtrip.solb", demo_values, version=3, dim=2)
-    sol = read_solution("roundtrip.solb")
-    print(f"Solution scalars: {sol['n_scalars']}, lines: {sol['values'].shape[0]}")
-    print("Solution round-trip matches:", np.allclose(demo_values, sol["values"]))
+    write("roundtrip.meshb", {"vertices": mesh["vertices"], "triangles": mesh["triangles"]}, version=3, dim=2)
+    write("roundtrip.solb", {"sol_at_vertices": {"values": demo_values}}, version=3, dim=2)
 
-    if len(sys.argv) == 3:
-        sol2 = read_solution(sys.argv[2])
-        print(f"'{sys.argv[2]}' scalars: {sol2['n_scalars']}, lines: {sol2['values'].shape[0]}")
+    check = read("roundtrip.meshb", types=["vertices", "triangles"])
+    print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertices"]))
+
+    sol = read("roundtrip.solb", types=["sol_at_vertices"])
+    print("Solution round-trip matches:",
+          np.allclose(demo_values, sol["sol_at_vertices"]["values"]))

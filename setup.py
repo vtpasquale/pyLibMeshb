@@ -84,8 +84,9 @@ class cross_build_ext(build_ext):
             build_ext.build_extensions(self)
 
     def get_ext_filename(self, ext_name):
+        ext_path = ext_name.split(".")
         suffix = ".dll" if TARGET == "win-amd64" else ".so"
-        return ext_name.rsplit(".", 1)[-1] + suffix
+        return os.path.join(*ext_path) + suffix
 
     @staticmethod
     def _mingw_available():
