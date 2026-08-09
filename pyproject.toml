@@ -1,6 +1,6 @@
 [project]
 name = "pyLibMeshb"
-version = "0.1.2"
+version = "0.1.3"
 description = "Python bindings for LibMeshb - the Gamma Mesh Format"
 readme = "README.md"
 authors = [

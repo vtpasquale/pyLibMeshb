@@ -10,12 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-      - run: uv build --wheel
+      - uses: pypa/cibuildwheel@v2.21
+        env:
+          CIBW_BUILD: "cp312-manylinux_x86_64"
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-linux
-          path: dist/*.whl
+          path: wheelhouse/*.whl
 
   build-windows:
     runs-on: ubuntu-latest
