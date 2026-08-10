@@ -14,8 +14,7 @@ jobs:
       - run: uv build --wheel
       - name: Repair to manylinux platform tag
         run: |
-          uv pip install --system auditwheel
-          auditwheel repair --plat manylinux2014_x86_64 -w dist_repaired dist/*.whl
+          uvx auditwheel repair --plat manylinux2014_x86_64 -w dist_repaired dist/*.whl
           rm dist/*.whl
           mv dist_repaired/*.whl dist/
       - name: Retag as Python-version-agnostic (ctypes, not a CPython extension)
