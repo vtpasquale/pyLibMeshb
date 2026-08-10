@@ -220,13 +220,15 @@ def list_types(path=None):
         present = []
         for name, spec in TYPES.items():
             kwd = KWD[spec["kwd"]]
-            n = LM.stat_kwd(handle, kwd)
+            if spec["kind"] == "solution":
+                n, _, _, _ = LM.stat_kwd_solution(handle, kwd)
+            else:
+                n = LM.stat_kwd(handle, kwd)
             if n > 0:
                 present.append(name)
         return sorted(present)
     finally:
         LM.close_mesh(handle)
-
 
 # ----------------------------------------------------------------------------
 # 2. read
