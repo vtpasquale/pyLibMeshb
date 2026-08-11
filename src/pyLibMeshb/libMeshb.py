@@ -37,10 +37,11 @@ Only keywords registered in ``TYPES`` are supported.
 """
 
 import ctypes
+import os
 import re
 import sys
 import importlib.resources
-from ctypes import c_int, c_int64, c_void_p, byref
+from ctypes import c_char_p, c_int, c_int64, c_void_p, byref
 import numpy as np
 
 GmfRead, GmfWrite = 1, 2
@@ -100,6 +101,7 @@ def parse_keyword_enum(header_path):
 class LibMeshb:
     def __init__(self, lib_path):
         self.lib = ctypes.CDLL(lib_path)
+        self.lib.GmfOpenMesh.argtypes = [c_char_p, c_int]
         self.lib.GmfOpenMesh.restype = c_int64
         self.lib.GmfStatKwd.restype = c_int64
         self.lib.GmfCloseMesh.restype = c_int
@@ -111,13 +113,13 @@ class LibMeshb:
 
     def open_mesh_read(self, path):
         ver, dim = c_int(0), c_int(0)
-        handle = self.lib.GmfOpenMesh(path.encode("utf-8"), c_int(GmfRead), byref(ver), byref(dim))
+        handle = self.lib.GmfOpenMesh(os.fsencode(path), c_int(GmfRead), byref(ver), byref(dim))
         if handle == 0:
             raise IOError(f"GmfOpenMesh failed to open '{path}'")
         return handle, ver.value, dim.value
 
     def open_mesh_write(self, path, version, dim):
-        handle = self.lib.GmfOpenMesh(path.encode("utf-8"), c_int(GmfWrite), c_int(version), c_int(dim))
+        handle = self.lib.GmfOpenMesh(os.fsencode(path), c_int(GmfWrite), c_int(version), c_int(dim))
         if handle == 0:
             raise IOError(f"GmfOpenMesh failed to create '{path}'")
         return handle

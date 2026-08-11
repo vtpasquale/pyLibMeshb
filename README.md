@@ -68,15 +68,6 @@ print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertice
 Round-trip vertices match: True
 ```
 
-## Testing
-
-Install the package with its test dependencies and run the automated tests:
-
-```bash
-python -m pip install -e ".[test]"
-python -m pytest
-```
-
 ### Read and write solution data
 Solution demo: 3 synthetic scalar fields (e.g. density, pressure, Mach).
 ```Python
@@ -131,8 +122,17 @@ all_types = lm.list_types()
 print(all_types)
 ```
 
-`['corners', 'dsol_at_vertices', 'edges', 'hexahedra', 'isol_at_edges', 'isol_at_hexahedra', 'isol_at_prisms', 'isol_at_quadrilaterals', 'isol_at_tetrahedra', 'isol_at_triangles', 'isol_at_vertices', 'prisms', 'pyramids', 'quadrilaterals', 'ridges', 'sol_at_edges', 'sol_at_hexahedra', 'sol_at_prisms', 'sol_at_quadrilaterals', 'sol_at_tetrahedra', 'sol_at_triangles', 'sol_at_vertices', 'tetrahedra', 'triangles', 'vertices']`
+`['corners', 'dsol_at_vertices', 'edges', 'hexahedra', 'isol_at_edges', 'isol_at_hexahedra', 'isol_at_prisms', 'isol_at_pyramids', 'isol_at_quadrilaterals', 'isol_at_tetrahedra', 'isol_at_triangles', 'isol_at_vertices', 'prisms', 'pyramids', 'quadrilaterals', 'ridges', 'sol_at_edges', 'sol_at_hexahedra', 'sol_at_prisms', 'sol_at_pyramids', 'sol_at_quadrilaterals', 'sol_at_tetrahedra', 'sol_at_triangles', 'sol_at_vertices', 'tetrahedra', 'triangles', 'vertices']`
 
+
+## Testing
+
+Install the package with its test dependencies and run the automated tests:
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest
+```
 
 ## Credits
 - [LibMeshb](https://github.com/LoicMarechal/libMeshb) — Loïc Maréchal, INRIA
