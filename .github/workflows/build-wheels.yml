@@ -74,10 +74,43 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - run: pip install check-wheel-contents && check-wheel-contents dist/*.whl
+      - name: Validate wheel and sdist metadata
+        run: |
+          python -m pip install check-wheel-contents twine
+          check-wheel-contents dist/*.whl
+          twine check dist/*
+
+  test-wheels:
+    needs: [build-linux, build-windows, build-macos]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: wheel-linux
+          - os: windows-latest
+            artifact: wheel-windows
+          - os: macos-latest
+            artifact: wheel-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Install wheel and test dependencies
+        run: |
+          python -m pip install pytest
+          python -m pip install --no-index --find-links dist pyLibMeshb
+      - name: Run tests against installed wheel
+        run: python -m pytest
 
   release:
-    needs: [build-linux, build-windows, build-macos, build-sdist, check-contents]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows, build-macos, build-sdist, check-contents, test-wheels]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -94,7 +127,7 @@ jobs:
 
   publish-pypi:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-linux, build-windows, build-macos, build-sdist, check-contents]
+    needs: [build-linux, build-windows, build-macos, build-sdist, check-contents, test-wheels]
     runs-on: ubuntu-latest
     environment:
       name: pypi
