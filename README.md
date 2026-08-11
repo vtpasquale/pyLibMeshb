@@ -67,6 +67,16 @@ print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertice
 ```text
 Round-trip vertices match: True
 ```
+
+## Testing
+
+Install the package with its test dependencies and run the automated tests:
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest
+```
+
 ### Read and write solution data
 Solution demo: 3 synthetic scalar fields (e.g. density, pressure, Mach).
 ```Python
