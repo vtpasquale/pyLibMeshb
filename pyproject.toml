@@ -1,6 +1,6 @@
 [project]
 name = "pyLibMeshb"
-version = "0.1.6"
+version = "0.1.7"
 description = "Read/write mesh and solution files in Gamma Mesh Format (.mesh/.meshb/.sol/.solb)."
 readme = "README.md"
 authors = [

@@ -48,7 +48,7 @@ EXPORTED_SYMBOLS = [
     "GmfGetFloatPrecision",
 ]
 
-class cross_build_ext(build_ext):
+class shared_lib_build_ext(build_ext):
 
     def run(self):
         build_ext.run(self)
@@ -90,5 +90,5 @@ class cross_build_ext(build_ext):
 
 setup(
     ext_modules=[libmeshb_ext],
-    cmdclass={"build_ext": cross_build_ext},
+    cmdclass={"build_ext": shared_lib_build_ext},
 )
