@@ -1,29 +1,39 @@
 """
-libMeshb_generic.py
---------------------
 Generic dictionary-driven read/write for .mesh/.meshb and .sol/.solb files
-via the LibMeshb C library (libmeshb8.c / libmeshb8.h), replacing per-type
-functions (read_mesh_2d, write_mesh_2d, read_solution, write_solution, ...)
-with three calls:
+via the LibMeshb C library (libmeshb8.c / libmeshb8.h).
 
-    list_types(path=None)        -> list of supported/present entity names
-    read(path, types=None)       -> dict of {name: array or {'values','field_types'}}
-    write(path, data, version, dim) -> None
+The module uses the bundled libMeshb C library through ``ctypes`` and provides
+four main functions:
 
-Design
-------
-A single registry `TYPES` maps a friendly entity name to a spec describing
-its libMeshb keyword and column layout:
+    list_types(path=None)
+        List registered entity names, or entities present in a file.
 
-    kind='vertex'   : dim float coordinate columns + 1 int ref column
-    kind='element'  : n_verts int index columns (+ 1 int ref column if has_ref)
-    kind='solution' : sol_size real columns, where sol_size and the per-field
-                      type table (Sca/Vec/SymMat/Mat) come straight from
-                      GmfStatKwd -- so ANY solution keyword works, not just
-                      all-scalar ones.
+    read(path, types=None)
+        Read selected entities, or automatically detect registered entities.
 
-Adding a new element type later (e.g. GmfPolygons) means adding one line to
-TYPES, not writing a new read_*/write_* function pair.
+    write(path, data, version=3, dim=None)
+        Write registered entities to a mesh or solution file.
+
+    mesh_info(path)
+        Print and return basic file metadata.
+
+The ``TYPES`` registry maps entity names to libMeshb keywords and
+describes their data layout:
+
+    vertex
+        Floating-point coordinates followed by an integer reference.
+
+    element
+        Fixed-width integer vertex indices, optionally followed by a reference.
+
+    solution
+        Real-valued fields described by libMeshb field types:
+        ``GmfSca``, ``GmfVec``, ``GmfSymMat``, and ``GmfMat``.
+
+    integer
+        Fixed-width integer records such as ``ISolAt*`` keywords.
+
+Only keywords registered in ``TYPES`` are supported.
 """
 
 import ctypes
@@ -60,16 +70,18 @@ TYPES = {
     "sol_at_triangles":        {"kwd": "GmfSolAtTriangles",      "kind": "solution"},
     "sol_at_quadrilaterals":   {"kwd": "GmfSolAtQuadrilaterals", "kind": "solution"},
     "sol_at_tetrahedra":       {"kwd": "GmfSolAtTetrahedra",     "kind": "solution"},
+    "sol_at_pyramids":         {"kwd": "GmfSolAtPyramids",       "kind": "solution"},
     "sol_at_prisms":           {"kwd": "GmfSolAtPrisms",         "kind": "solution"},
     "sol_at_hexahedra":        {"kwd": "GmfSolAtHexahedra",      "kind": "solution"},
     "dsol_at_vertices":        {"kwd": "GmfDSolAtVertices",      "kind": "solution"},
-    "isol_at_vertices":        {"kwd": "GmfISolAtVertices",      "kind": "solution"},
-    "isol_at_edges":           {"kwd": "GmfISolAtEdges",         "kind": "solution"},
-    "isol_at_triangles":       {"kwd": "GmfISolAtTriangles",     "kind": "solution"},
-    "isol_at_quadrilaterals":  {"kwd": "GmfISolAtQuadrilaterals","kind": "solution"},
-    "isol_at_tetrahedra":      {"kwd": "GmfISolAtTetrahedra",    "kind": "solution"},
-    "isol_at_prisms":          {"kwd": "GmfISolAtPrisms",        "kind": "solution"},
-    "isol_at_hexahedra":       {"kwd": "GmfISolAtHexahedra",     "kind": "solution"},
+    "isol_at_vertices":       {"kwd": "GmfISolAtVertices",      "kind": "integer", "n_cols": 1},
+    "isol_at_edges":          {"kwd": "GmfISolAtEdges",         "kind": "integer", "n_cols": 2},
+    "isol_at_triangles":      {"kwd": "GmfISolAtTriangles",     "kind": "integer", "n_cols": 3},
+    "isol_at_quadrilaterals": {"kwd": "GmfISolAtQuadrilaterals","kind": "integer", "n_cols": 4},
+    "isol_at_tetrahedra":     {"kwd": "GmfISolAtTetrahedra",    "kind": "integer", "n_cols": 4},
+    "isol_at_pyramids":       {"kwd": "GmfISolAtPyramids",      "kind": "integer", "n_cols": 5},
+    "isol_at_prisms":         {"kwd": "GmfISolAtPrisms",        "kind": "integer", "n_cols": 6},
+    "isol_at_hexahedra":      {"kwd": "GmfISolAtHexahedra",      "kind": "integer", "n_cols": 8},
 }
 
 # ----------------------------------------------------------------------------
@@ -177,6 +189,15 @@ def vec_field(type_code_vec, count, arr2d):
     return ("vec", type_code_vec, count, arr2d)
 
 
+def _keyword_count(handle, spec):
+    kwd = KWD[spec["kwd"]]
+    if spec["kind"] == "solution":
+        count, _, _, _ = LM.stat_kwd_solution(handle, kwd)
+    else:
+        count = LM.stat_kwd(handle, kwd)
+    return count
+
+
 # ----------------------------------------------------------------------------
 # Module setup
 # ----------------------------------------------------------------------------
@@ -203,6 +224,45 @@ def _field_width(type_code, dim):
     raise ValueError(f"Unknown solution field type code {type_code}")
 
 
+def _validate_matrix(payload, name, n_cols):
+    arr = np.asarray(payload)
+    if arr.ndim != 2 or arr.shape[1] != n_cols:
+        raise ValueError(
+            f"'{name}' must be a 2D array with {n_cols} columns; "
+            f"got shape {arr.shape}"
+        )
+    return arr
+
+
+def _validate_solution(payload, name, dim):
+    if not isinstance(payload, dict) or "values" not in payload:
+        raise ValueError(f"'{name}' must be a dict containing a 'values' array")
+
+    values = np.asarray(payload["values"])
+    if values.ndim not in (1, 2):
+        raise ValueError(f"'{name}[values]' must be a 1D or 2D array; got shape {values.shape}")
+    values = np.atleast_2d(values)
+    sol_size = values.shape[1]
+
+    field_types = payload.get("field_types")
+    if field_types is None:
+        field_types = [GmfSca] * sol_size
+    else:
+        try:
+            field_types = list(field_types)
+        except TypeError as exc:
+            raise ValueError(f"'{name}[field_types]' must be an iterable of field type codes") from exc
+
+    if not field_types:
+        raise ValueError(f"'{name}[field_types]' must not be empty")
+    expected_size = sum(_field_width(type_code, dim) for type_code in field_types)
+    if expected_size != sol_size:
+        raise ValueError(
+            f"'{name}[values]' has {sol_size} columns, but field_types require {expected_size}"
+        )
+    return values, field_types
+
+
 # ----------------------------------------------------------------------------
 # 1. list_types
 # ----------------------------------------------------------------------------
@@ -219,11 +279,7 @@ def list_types(path=None):
     try:
         present = []
         for name, spec in TYPES.items():
-            kwd = KWD[spec["kwd"]]
-            if spec["kind"] == "solution":
-                n, _, _, _ = LM.stat_kwd_solution(handle, kwd)
-            else:
-                n = LM.stat_kwd(handle, kwd)
+            n = _keyword_count(handle, spec)
             if n > 0:
                 present.append(name)
         return sorted(present)
@@ -251,7 +307,7 @@ def read(path, types=None):
     handle, ver, dim = LM.open_mesh_read(path)
     if types is None:
         types = [name for name, spec in TYPES.items()
-                  if LM.stat_kwd(handle, KWD[spec["kwd"]]) > 0]
+                 if _keyword_count(handle, spec) > 0]
 
     float_bits = LM.float_precision(handle)
     float_dtype = np.float32 if float_bits == 32 else np.float64
@@ -293,6 +349,19 @@ def read(path, types=None):
                         arr[:, i] = c
                 result[name] = arr
 
+            elif spec["kind"] == "integer":
+                n = LM.stat_kwd(handle, kwd)
+                arr = np.empty((n, spec["n_cols"]), dtype=np.int64)
+                if n > 0:
+                    cols = [np.empty(n, dtype=int_dtype)
+                            for _ in range(spec["n_cols"])]
+                    LM.goto_kwd(handle, kwd)
+                    LM.get_block(handle, kwd, n,
+                                 [scalar_field(int_code, col) for col in cols])
+                    for i, col in enumerate(cols):
+                        arr[:, i] = col
+                result[name] = arr
+
             elif spec["kind"] == "solution":
                 n, n_types_, sol_size, field_types = LM.stat_kwd_solution(handle, kwd)
                 if n == 0:
@@ -326,11 +395,37 @@ def write(path, data, version=3, dim=None):
     dim : spatial dimension; if None, inferred from data['vertices'] width - 1,
           else defaults to 2.
     """
+    if not isinstance(data, dict):
+        raise ValueError("data must be a dictionary")
+    if version not in (1, 2, 3, 4):
+        raise ValueError(f"version must be one of 1, 2, 3, or 4; got {version}")
+
     if dim is None:
         if "vertices" in data:
-            dim = data["vertices"].shape[1] - 1
+            vertices = np.asarray(data["vertices"])
+            if vertices.ndim != 2:
+                raise ValueError(f"'vertices' must be a 2D array; got shape {vertices.shape}")
+            dim = vertices.shape[1] - 1
         else:
             dim = 2
+    if dim not in (2, 3):
+        raise ValueError(f"dim must be 2 or 3; got {dim}")
+
+    for name, payload in data.items():
+        if name in ("version", "dim"):
+            continue
+        if name not in TYPES:
+            raise ValueError(f"Unknown data type '{name}'")
+        spec = TYPES[name]
+        if spec["kind"] == "vertex":
+            _validate_matrix(payload, name, dim + 1)
+        elif spec["kind"] == "element":
+            _validate_matrix(payload, name,
+                             spec["n_verts"] + (1 if spec["has_ref"] else 0))
+        elif spec["kind"] == "integer":
+            _validate_matrix(payload, name, spec["n_cols"])
+        elif spec["kind"] == "solution":
+            _validate_solution(payload, name, dim)
 
     handle = LM.open_mesh_write(path, version, dim)
     float_dtype = np.float32 if version == 1 else np.float64
@@ -347,7 +442,7 @@ def write(path, data, version=3, dim=None):
             kwd = KWD[spec["kwd"]]
 
             if spec["kind"] == "vertex":
-                arr = np.asarray(payload, dtype=np.float64)
+                arr = _validate_matrix(payload, name, dim + 1).astype(np.float64, copy=False)
                 n = arr.shape[0]
                 if n == 0:
                     continue
@@ -359,21 +454,32 @@ def write(path, data, version=3, dim=None):
                              [scalar_field(int_code, ref)])
 
             elif spec["kind"] == "element":
-                arr = np.asarray(payload, dtype=np.int64)
+                n_cols = spec["n_verts"] + (1 if spec["has_ref"] else 0)
+                arr = _validate_matrix(payload, name, n_cols).astype(np.int64, copy=False)
                 n = arr.shape[0]
                 if n == 0:
                     continue
-                n_cols = spec["n_verts"] + (1 if spec["has_ref"] else 0)
                 cols = [np.ascontiguousarray(arr[:, i], dtype=int_dtype) for i in range(n_cols)]
                 LM.set_kwd(handle, kwd, n)
                 LM.set_block(handle, kwd, n, [scalar_field(int_code, c) for c in cols])
 
+            elif spec["kind"] == "integer":
+                arr = _validate_matrix(payload, name, spec["n_cols"]).astype(np.int64, copy=False)
+                n = arr.shape[0]
+                if n == 0:
+                    continue
+                cols = [np.ascontiguousarray(arr[:, i], dtype=int_dtype)
+                        for i in range(spec["n_cols"])]
+                LM.set_kwd(handle, kwd, n)
+                LM.set_block(handle, kwd, n,
+                             [scalar_field(int_code, c) for c in cols])
+
             elif spec["kind"] == "solution":
-                values = np.atleast_2d(np.asarray(payload["values"], dtype=np.float64))
+                values, field_types = _validate_solution(payload, name, dim)
+                values = values.astype(np.float64, copy=False)
                 n, sol_size = values.shape
                 if n == 0:
                     continue
-                field_types = payload.get("field_types") or [GmfSca] * sol_size
                 LM.set_kwd_solution(handle, kwd, n, field_types)
                 buf = np.ascontiguousarray(values, dtype=float_dtype)
                 LM.set_block(handle, kwd, n, [vec_field(float_code_vec, sol_size, buf)])
@@ -414,7 +520,8 @@ def mesh_info(path):
             else:
                 n_lines = LM.stat_kwd(handle, kwd)
                 if n_lines > 0:
-                    print(f"{name:<25}{spec['kind']:<12}{n_lines:>10}")
+                    details = f"n_cols={spec['n_cols']}" if spec["kind"] == "integer" else ""
+                    print(f"{name:<25}{spec['kind']:<12}{n_lines:>10}   {details}")
     finally:
         LM.close_mesh(handle)
 
