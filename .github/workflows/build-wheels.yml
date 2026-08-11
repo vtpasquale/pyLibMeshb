@@ -34,7 +34,13 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv build --wheel
       - name: Retag as Python-version-agnostic (ctypes, not a CPython extension)
-        run: uvx wheel tags --python-tag py3 --abi-tag none --remove dist/*.whl
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem -Path dist -Filter *.whl | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $wheel) {
+            throw "uv build did not produce a wheel in dist"
+          }
+          uvx wheel tags --python-tag py3 --abi-tag none --remove $wheel
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-windows
