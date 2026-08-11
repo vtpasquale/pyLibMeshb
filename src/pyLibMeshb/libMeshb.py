@@ -103,12 +103,21 @@ class LibMeshb:
         self.lib = ctypes.CDLL(lib_path)
         self.lib.GmfOpenMesh.argtypes = [c_char_p, c_int]
         self.lib.GmfOpenMesh.restype = c_int64
+        self.lib.GmfStatKwd.argtypes = [c_int64, c_int]
         self.lib.GmfStatKwd.restype = c_int64
-        self.lib.GmfCloseMesh.restype = c_int
-        self.lib.GmfGotoKwd.restype = c_int
-        self.lib.GmfGetBlock.restype = c_int
-        self.lib.GmfSetBlock.restype = c_int
+        self.lib.GmfSetKwd.argtypes = [c_int64, c_int, c_int64]
         self.lib.GmfSetKwd.restype = c_int
+        self.lib.GmfCloseMesh.argtypes = [c_int64]
+        self.lib.GmfCloseMesh.restype = c_int
+        self.lib.GmfGotoKwd.argtypes = [c_int64, c_int]
+        self.lib.GmfGotoKwd.restype = c_int
+        block_argtypes = [c_int64, c_int, c_int64, c_int64,
+                  c_int, c_void_p, c_void_p]
+        self.lib.GmfGetBlock.argtypes = block_argtypes
+        self.lib.GmfGetBlock.restype = c_int
+        self.lib.GmfSetBlock.argtypes = block_argtypes
+        self.lib.GmfSetBlock.restype = c_int
+        self.lib.GmfGetFloatPrecision.argtypes = [c_int64]
         self.lib.GmfGetFloatPrecision.restype = c_int
 
     def open_mesh_read(self, path):
