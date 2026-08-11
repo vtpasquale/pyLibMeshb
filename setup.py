@@ -39,7 +39,7 @@ libmeshb_ext = Extension(
 HEADER_SRC = Path("csrc/libMeshb/libmeshb8.h")
 
 class cross_build_ext(build_ext):
-    
+
     def run(self):
         build_ext.run(self)
         self._copy_header()
@@ -49,7 +49,28 @@ class cross_build_ext(build_ext):
             dest_dir = Path(self.get_ext_fullpath(ext.name)).parent
             dest_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(HEADER_SRC, dest_dir / HEADER_SRC.name)
-    
+
+    def build_extension(self, ext):
+        objects = self.compiler.compile(
+            ext.sources,
+            output_dir=self.build_temp,
+            macros=ext.define_macros,
+            include_dirs=ext.include_dirs,
+            debug=self.debug,
+            extra_postargs=ext.extra_compile_args,
+        )
+        output_path = Path(self.get_ext_fullpath(ext.name))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.compiler.link_shared_object(
+            objects,
+            str(output_path),
+            libraries=ext.libraries,
+            library_dirs=ext.library_dirs,
+            runtime_library_dirs=ext.runtime_library_dirs,
+            extra_postargs=ext.extra_link_args,
+            debug=self.debug,
+        )
+
     def get_ext_filename(self, ext_name):
         ext_path = ext_name.split(".")
         suffix = ".dll" if NATIVE_WINDOWS else ".so"
