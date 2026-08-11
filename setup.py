@@ -31,13 +31,14 @@ from setuptools.errors import LinkError
 
 MINGW_CC = "x86_64-w64-mingw32-gcc"
 TARGET = os.environ.get("TARGET")  # None (native) or "win-amd64"
+NATIVE_WINDOWS = os.name == "nt"
 
 libmeshb_ext = Extension(
     "pyLibMeshb._libmeshb",
     sources=["csrc/libMeshb/libmeshb8.c"],
     include_dirs=["csrc/libMeshb"],
     extra_compile_args=["-O2"],
-    libraries=[] if TARGET == "win-amd64" else ["z"],
+    libraries=[] if TARGET == "win-amd64" or NATIVE_WINDOWS else ["z"],
 )
 
 HEADER_SRC = Path("csrc/libMeshb/libmeshb8.h")
@@ -55,7 +56,7 @@ class cross_build_ext(build_ext):
             shutil.copy2(HEADER_SRC, dest_dir / HEADER_SRC.name)
     
     def build_extensions(self):
-        if TARGET == "win-amd64":
+        if TARGET == "win-amd64" and not NATIVE_WINDOWS:
             if not self._mingw_available():
                 raise RuntimeError(
                     f"{MINGW_CC} not found on PATH. Install it with:\n"
@@ -85,7 +86,7 @@ class cross_build_ext(build_ext):
 
     def get_ext_filename(self, ext_name):
         ext_path = ext_name.split(".")
-        suffix = ".dll" if TARGET == "win-amd64" else ".so"
+        suffix = ".dll" if TARGET == "win-amd64" or NATIVE_WINDOWS else ".so"
         return os.path.join(*ext_path) + suffix
 
     @staticmethod

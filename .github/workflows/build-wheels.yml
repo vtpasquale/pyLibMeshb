@@ -25,16 +25,14 @@ jobs:
           path: dist/*.whl
 
   build-windows:
-    runs-on: ubuntu-latest
-    env:
-      TARGET: win-amd64
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@v7
-      - name: Install MinGW cross-compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - run: uv build --wheel
-      - run: uvx wheel tags --platform-tag win_amd64 --remove dist/*.whl
       - name: Retag as Python-version-agnostic (ctypes, not a CPython extension)
         run: uvx wheel tags --python-tag py3 --abi-tag none --remove dist/*.whl
       - uses: actions/upload-artifact@v4
