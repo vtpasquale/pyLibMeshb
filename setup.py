@@ -37,6 +37,16 @@ libmeshb_ext = Extension(
 )
 
 HEADER_SRC = Path("csrc/libMeshb/libmeshb8.h")
+EXPORTED_SYMBOLS = [
+    "GmfOpenMesh",
+    "GmfCloseMesh",
+    "GmfStatKwd",
+    "GmfSetKwd",
+    "GmfGotoKwd",
+    "GmfGetBlock",
+    "GmfSetBlock",
+    "GmfGetFloatPrecision",
+]
 
 class cross_build_ext(build_ext):
 
@@ -68,6 +78,7 @@ class cross_build_ext(build_ext):
             library_dirs=ext.library_dirs,
             runtime_library_dirs=ext.runtime_library_dirs,
             extra_postargs=ext.extra_link_args,
+            export_symbols=EXPORTED_SYMBOLS,
             debug=self.debug,
         )
 
