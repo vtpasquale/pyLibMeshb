@@ -11,8 +11,11 @@ four main functions:
     read(path, types=None)
         Read selected entities, or automatically detect registered entities.
 
-    write(path, data, version=3, dim=None)
+    write(path, data)
         Write registered entities to a mesh or solution file.
+
+        Optional metadata keys in ``data`` may set ``version`` and ``dim``;
+        otherwise they default to 3 and 3.
 
     mesh_info(path)
         Print and return basic file metadata.
@@ -394,31 +397,35 @@ def read(path, types=None):
 # ----------------------------------------------------------------------------
 # 3. write
 # ----------------------------------------------------------------------------
-def write(path, data, version=3, dim=None):
+def write(path, data):
     """
     Write one or more entity types to a .mesh/.meshb or .sol/.solb file.
 
     data : dict using the same shapes as returned by read(), e.g.
-        {'vertices': (N, dim+1) array, 'triangles': (M, 4) array,
+        {'version': 3, 'dim': 2,
+         'vertices': (N, dim+1) array, 'triangles': (M, 4) array,
          'sol_at_vertices': {'values': (N, sol_size) array,
-                              'field_types': [GmfSca]*sol_size}}   # optional
-    version : file format version (1-4).
-    dim : spatial dimension; if None, inferred from data['vertices'] width - 1,
-          else defaults to 2.
+                              'field_types': [GmfSca]*sol_size}}
+    If ``version`` is omitted from ``data`` it defaults to 3. If ``dim`` is
+    omitted, it is inferred from ``vertices`` when possible and otherwise falls
+    back to 3.
     """
     if not isinstance(data, dict):
         raise ValueError("data must be a dictionary")
-    if version not in (1, 2, 3, 4):
-        raise ValueError(f"version must be one of 1, 2, 3, or 4; got {version}")
 
+    version = data.get("version", 3)
+    dim = data.get("dim")
     if dim is None:
         if "vertices" in data:
             vertices = np.asarray(data["vertices"])
             if vertices.ndim != 2:
                 raise ValueError(f"'vertices' must be a 2D array; got shape {vertices.shape}")
-            dim = vertices.shape[1] - 1
+            inferred_dim = vertices.shape[1] - 1
+            dim = inferred_dim if inferred_dim in (2, 3) else 3
         else:
-            dim = 2
+            dim = 3
+    if version not in (1, 2, 3, 4):
+        raise ValueError(f"version must be one of 1, 2, 3, or 4; got {version}")
     if dim not in (2, 3):
         raise ValueError(f"dim must be 2 or 3; got {dim}")
 
@@ -554,8 +561,10 @@ if __name__ == "__main__":
         np.linspace(101325.0, 90000.0, n),
         np.linspace(0.1, 3.5, n),
     ])
-    write("roundtrip.meshb", {"vertices": mesh["vertices"], "triangles": mesh["triangles"]}, version=3, dim=2)
-    write("roundtrip.solb", {"sol_at_vertices": {"values": demo_values}}, version=3, dim=2)
+    write("roundtrip.meshb", {"version": 3, "dim": 2,
+                             "vertices": mesh["vertices"], "triangles": mesh["triangles"]})
+    write("roundtrip.solb", {"version": 3, "dim": 2,
+                             "sol_at_vertices": {"values": demo_values}})
 
     check = read("roundtrip.meshb", types=["vertices", "triangles"])
     print("Round-trip vertices match:", np.allclose(mesh["vertices"], check["vertices"]))

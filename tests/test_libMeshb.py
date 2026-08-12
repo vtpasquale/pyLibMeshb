@@ -34,15 +34,11 @@ def test_mesh_and_solution_round_trip(tmp_path):
 
     lm.write(
         str(mesh_path),
-        {"vertices": vertices, "triangles": triangles},
-        version=3,
-        dim=2,
+        {"version": 3, "dim": 2, "vertices": vertices, "triangles": triangles},
     )
     lm.write(
         str(solution_path),
-        {"sol_at_vertices": {"values": values, "field_types": [lm.GmfSca] * 2}},
-        version=3,
-        dim=2,
+        {"version": 3, "dim": 2, "sol_at_vertices": {"values": values, "field_types": [lm.GmfSca] * 2}},
     )
 
     assert lm.list_types(str(mesh_path)) == ["triangles", "vertices"]
@@ -59,13 +55,52 @@ def test_mesh_and_solution_round_trip(tmp_path):
     assert solution["sol_at_vertices"]["field_types"] == [lm.GmfSca, lm.GmfSca]
 
 
+def test_write_uses_version_and_dim_from_data_metadata(tmp_path):
+    path = tmp_path / "mesh.meshb"
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0, 10],
+            [1.0, 0.0, 0.0, 20],
+            [0.0, 1.0, 0.0, 30],
+        ],
+        dtype=np.float64,
+    )
+    triangles = np.array([[0, 1, 2, 7]], dtype=np.int64)
+
+    lm.write(str(path), {"version": 4, "dim": 3, "vertices": vertices, "triangles": triangles})
+
+    assert lm.mesh_info(str(path)) == (4, 3)
+    mesh = lm.read(str(path), types=["vertices", "triangles"])
+    assert mesh["version"] == 4
+    assert mesh["dim"] == 3
+    np.testing.assert_allclose(mesh["vertices"], vertices)
+
+
+def test_write_infers_dim_from_vertices_when_dim_missing(tmp_path):
+    path = tmp_path / "mesh.meshb"
+    vertices = np.array(
+        [
+            [0.0, 0.0, 10],
+            [1.0, 0.0, 20],
+            [0.0, 1.0, 30],
+        ],
+        dtype=np.float64,
+    )
+    triangles = np.array([[0, 1, 2, 7]], dtype=np.int64)
+
+    lm.write(str(path), {"version": 3, "vertices": vertices, "triangles": triangles})
+
+    assert lm.mesh_info(str(path)) == (3, 2)
+    mesh = lm.read(str(path), types=["vertices", "triangles"])
+    assert mesh["dim"] == 2
+    np.testing.assert_allclose(mesh["vertices"], vertices)
+
+
 def test_mesh_info_reports_file_metadata(tmp_path, capsys):
     path = tmp_path / "mesh.meshb"
     lm.write(
         str(path),
-        {"vertices": np.array([[0.0, 0.0, 1], [1.0, 0.0, 1], [0.0, 1.0, 1]])},
-        version=3,
-        dim=2,
+        {"version": 3, "dim": 2, "vertices": np.array([[0.0, 0.0, 1], [1.0, 0.0, 1], [0.0, 1.0, 1]])},
     )
 
     assert lm.mesh_info(str(path)) == (3, 2)

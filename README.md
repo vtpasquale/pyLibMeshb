@@ -54,7 +54,7 @@ dict_keys(['version', 'dim', 'vertices', 'edges', 'triangles'])
 
 Write the mesh back out.
 ```Python
-lm.write("roundtrip.meshb",mesh)
+lm.write("roundtrip.meshb", mesh)
 ```
 
 Verify consistency.
@@ -77,7 +77,7 @@ demo_values = np.column_stack([
     np.linspace(101325.0, 90000.0, n),
     np.linspace(0.1, 3.5, n),
 ])
-lm.write("naca0012.solb", {"sol_at_vertices": {"values": demo_values}}, version=3, dim=2)
+lm.write("naca0012.solb", {"version": 3, "dim": 2, "sol_at_vertices": {"values": demo_values}})
 ```
 Check solution file information.
 ```Python
