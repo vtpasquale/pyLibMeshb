@@ -5,6 +5,9 @@ Python module to read/write mesh and solution files in Gamma Mesh Format
  [libMeshb](https://github.com/LoicMarechal/libMeshb) source 
  (`libmeshb8.c` / `libmeshb8.h`) directly and binding via Python ctypes.
 
+
+PyPI distributions include precompiled shared libraries for Linux, Windows, and macOS, so most users can install with `pip install pyLibMeshb` without a C compiler or build toolchain. Wheels bundle the compiled `libmeshb8` binary with the Python ctypes bindings, so the extension loads correctly on the host platform. If no prebuilt wheel matches your platform, pip falls back to building from source.
+
 ## Getting Started
 
 ### Install
